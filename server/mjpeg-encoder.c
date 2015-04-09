@@ -117,7 +117,7 @@ typedef struct MJpegEncoderBitRateInfo {
     int was_upgraded;
 
     /* gathering data about the frames that
-     * were encoded since the last bit rate change*/
+     * were encoded since the last bit rate change */
     uint32_t num_enc_frames;
     uint64_t sum_enc_size;
 } MJpegEncoderBitRateInfo;
@@ -411,7 +411,7 @@ static inline void mjpeg_encoder_reset_quality(MJpegEncoder *encoder,
  * During quality evaluation, mjpeg_encoder_eval_quality is called before a new
  * frame is encoded. mjpeg_encoder_eval_quality examines the encoding size of
  * the previously encoded frame, and determines whether to continue evaluation
- * (and chnages the quality for the frame that is going to be encoded),
+ * (and changes the quality for the frame that is going to be encoded),
  * or stop evaluation (and sets the quality and frame rate for the stream).
  * When qualities are scanned, we assume monotonicity of compression ratio
  * as a function of jpeg quality. When we reach a quality with too small, or
@@ -518,7 +518,7 @@ static inline void mjpeg_encoder_eval_quality(MJpegEncoder *encoder)
 complete_sample:
     if (quality_eval->max_sampled_fps != 0) {
         /* covering a case were monotonicity was violated and we sampled
-           a better jepg quality, with better frame rate. */
+           a better jpeg quality, with better frame rate. */
         final_quality_id = MAX(rate_control->quality_id,
                                quality_eval->max_sampled_fps_quality_id);
     } else {
@@ -660,7 +660,7 @@ end:
 
 /*
  * The actual frames distribution does not necessarily fit the condition "at least
- * one frame every (1000/rate_contorl->fps) milliseconds".
+ * one frame every (1000/rate_control->fps) milliseconds".
  * For keeping the average fps close to the defined fps, we periodically
  * measure the current average fps, and modify rate_control->adjusted_fps accordingly.
  * Then, we use (1000/rate_control->adjusted_fps) as the interval between frames.
@@ -1029,7 +1029,7 @@ static void mjpeg_encoder_decrease_bit_rate(MJpegEncoder *encoder)
         measured_byte_rate = bit_rate_info->sum_enc_size / duration_sec;
         measured_fps = bit_rate_info->num_enc_frames / duration_sec;
         decrease_size = bit_rate_info->sum_enc_size / bit_rate_info->num_enc_frames;
-        spice_debug("bit rate esitimation %.2f (Mbps) fps %u",
+        spice_debug("bit rate estimation %.2f (Mbps) fps %u",
                     measured_byte_rate*8/1024.0/1024,
                     measured_fps);
     } else {
@@ -1072,7 +1072,7 @@ static void mjpeg_encoder_handle_negative_client_stream_report(MJpegEncoder *enc
     if ((rate_control->bit_rate_info.change_start_mm_time > report_end_frame_mm_time ||
         !rate_control->bit_rate_info.change_start_mm_time) &&
          !rate_control->bit_rate_info.was_upgraded) {
-        spice_debug("ignoring, a downgrade has already occurred later to the report time");
+        spice_debug("ignoring, a downgrade has already occurred after the report time");
         return;
     }
 
@@ -1098,7 +1098,7 @@ static void mjpeg_encoder_increase_bit_rate(MJpegEncoder *encoder)
         measured_byte_rate = bit_rate_info->sum_enc_size / duration_sec;
         measured_fps = bit_rate_info->num_enc_frames / duration_sec;
         avg_frame_size = bit_rate_info->sum_enc_size / bit_rate_info->num_enc_frames;
-        spice_debug("bit rate esitimation %.2f (Mbps) defined %.2f"
+        spice_debug("bit rate estimation %.2f (Mbps) defined %.2f"
                     " fps %u avg-frame-size=%.2f (KB)",
                     measured_byte_rate*8/1024.0/1024,
                     rate_control->byte_rate*8/1024.0/1024,
@@ -1168,8 +1168,8 @@ static void mjpeg_encoder_handle_positive_client_stream_report(MJpegEncoder *enc
 }
 
 /*
- * the video playback jitter buffer should be at least (send_time*2 + net_latency) for
- * preventing underflow
+ * the video playback jitter buffer should be at least (send_time*2 + net_latency) to
+ * prevent underflows
  */
 static uint32_t get_min_required_playback_delay(uint64_t frame_enc_size,
                                                 uint64_t byte_rate,
@@ -1276,7 +1276,7 @@ static void mjpeg_encoder_client_stream_report(VideoEncoder *video_encoder,
         major_delay_decrease_thresh = medium_delay_decrease_thresh;
         major_delay_decrease_thresh *= MJPEG_PLAYBACK_LATENCY_DECREASE_FACTOR;
         /*
-         * since the bit rate and the required latency are only evaluation based on the
+         * since the bit rate and the required latency are only evaluations based on the
          * reports we got till now, we assume that the latency is too low only if it
          * was higher during the time that passed since the last report that resulted
          * in a bit rate decrement. If we find that the latency has decreased, it might
@@ -1304,8 +1304,8 @@ static void mjpeg_encoder_notify_server_frame_drop(VideoEncoder *video_encoder)
 }
 
 /*
- * decrease the bit rate if the drop rate on the sever side exceeds a pre defined
- * threshold.
+ * decrease the bit rate if the drop rate on the server side exceeds a
+ * predefined threshold.
  */
 static void mjpeg_encoder_process_server_drops(MJpegEncoder *encoder)
 {

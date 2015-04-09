@@ -194,7 +194,7 @@ dispatcher_new(size_t max_message_type, void *opaque)
 
 /*
  * read_safe
- * helper. reads until size bytes accumulated in buf, if an error other then
+ * helper. reads until size bytes accumulated in buf, if an error other than
  * EINTR is encountered returns -1, otherwise returns 0.
  * @block if 1 the read will block (the fd is always blocking).
  *        if 0 poll first, return immediately if no bytes available, otherwise
