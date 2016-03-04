@@ -879,6 +879,25 @@ static GstFlowReturn new_sample(GstAppSink *gstappsink, gpointer video_encoder)
     return GST_FLOW_OK;
 }
 
+static int physical_core_count = 0;
+static int get_physical_core_count(void)
+{
+    if (!physical_core_count) {
+#ifdef _SC_NPROCESSORS_ONLN
+        physical_core_count = sysconf(_SC_NPROCESSORS_ONLN);
+#endif
+        if (system("egrep -l '^flags\\b.*: .*\\bht\\b' /proc/cpuinfo >/dev/null 2>&1") == 0) {
+            /* Hyperthreading is enabled so divide by two to get the number
+             * of physical cores.
+             */
+            physical_core_count = physical_core_count / 2;
+        }
+        if (physical_core_count == 0)
+            physical_core_count = 1;
+    }
+    return physical_core_count;
+}
+
 static const gchar* get_gst_codec_name(SpiceGstEncoder *encoder)
 {
     switch (encoder->base.codec_type)
@@ -902,6 +921,7 @@ static const gchar* get_gst_codec_name(SpiceGstEncoder *encoder)
     }
 }
 
+/* A helper for spice_gst_encoder_encode_frame() */
 static gboolean create_pipeline(SpiceGstEncoder *encoder)
 {
 #ifdef HAVE_GSTREAMER_0_10
@@ -941,11 +961,17 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
          *   75% CPU usage while speed simply prioritizes encoding speed.
          * - deadline is supposed to be set in microseconds but in practice
          *   it behaves like a boolean.
+         * - At least up to GStreamer 1.6.2, vp8enc cannot be trusted to pick
+         *   the optimal number of threads. Also exceeding the number of
+         *   physical core really degrades image quality.
+         * - token-parts/token-partitions parallelizes more operations.
          */
+        int threads = get_physical_core_count();
+        int parts = threads < 2 ? 0 : threads < 4 ? 1 : threads < 8 ? 2 : 3;
 #ifdef HAVE_GSTREAMER_0_10
-        gstenc_opts = g_strdup_printf("mode=cbr min-quantizer=10 error-resilient=true max-latency=0 speed=7");
+        gstenc_opts = g_strdup_printf("mode=cbr min-quantizer=10 error-resilient=true max-latency=0 speed=7 threads=%d token-parts=%d", threads, parts);
 #else
-        gstenc_opts = g_strdup_printf("end-usage=cbr min-quantizer=10 error-resilient=default lag-in-frames=0 deadline=1 cpu-used=4");
+        gstenc_opts = g_strdup_printf("end-usage=cbr min-quantizer=10 error-resilient=default lag-in-frames=0 deadline=1 cpu-used=4 threads=%d token-partitions=%d", threads, parts);
 #endif
         break;
         }
