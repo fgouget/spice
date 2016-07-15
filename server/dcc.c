@@ -691,12 +691,10 @@ RedPipeItem *dcc_gl_scanout_item_new(RedChannelClient *rcc, void *data, int num)
 {
     RedGlScanoutUnixItem *item;
 
-    /* FIXME: on !unix peer, start streaming with a video codec */
+    /* no need and not possible to send scanout, upper layer code will do
+     * video streaming */
     if (!red_stream_is_plain_unix(red_channel_client_get_stream(rcc)) ||
         !red_channel_client_test_remote_cap(rcc, SPICE_DISPLAY_CAP_GL_SCANOUT)) {
-        red_channel_warning(red_channel_client_get_channel(rcc),
-                            "FIXME: client does not support GL scanout");
-        red_channel_client_disconnect(rcc);
         return NULL;
     }
 
