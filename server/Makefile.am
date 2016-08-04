@@ -18,6 +18,7 @@ AM_CPPFLAGS =					\
 	$(GSTREAMER_1_0_CFLAGS)			\
 	$(SPICE_PROTOCOL_CFLAGS)		\
 	$(SSL_CFLAGS)				\
+	$(EPOXY_CFLAGS)				\
 	$(VISIBILITY_HIDDEN_CFLAGS)		\
 	$(WARN_CFLAGS)				\
 	$(ORC_CFLAGS)				\
@@ -54,6 +55,7 @@ libserver_la_LIBADD =							\
 	$(GSTREAMER_0_10_LIBS)						\
 	$(GSTREAMER_1_0_LIBS)						\
 	$(SSL_LIBS)							\
+	$(EPOXY_LIBS)							\
 	$(Z_LIBS)							\
 	$(SPICE_NONPKGCONFIG_LIBS)					\
 	$(ORC_LIBS)							\
