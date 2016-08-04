@@ -1719,7 +1719,7 @@ static bool red_marshall_stream_data(RedChannelClient *rcc,
     ret = !agent->video_encoder ? VIDEO_ENCODER_FRAME_UNSUPPORTED :
           agent->video_encoder->encode_frame(agent->video_encoder,
                                              frame_mm_time,
-                                             &copy->src_bitmap->u.bitmap,
+                                             copy->src_bitmap,
                                              &copy->src_area, stream->top_down,
                                              drawable->red_drawable,
                                              &outbuf);

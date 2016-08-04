@@ -931,7 +931,7 @@ static bool encode_frame(MJpegEncoder *encoder, const SpiceRect *src,
 
 static int mjpeg_encoder_encode_frame(VideoEncoder *video_encoder,
                                       uint32_t frame_mm_time,
-                                      const SpiceBitmap *bitmap,
+                                      SpiceImage *image,
                                       const SpiceRect *src, int top_down,
                                       gpointer bitmap_opaque,
                                       VideoBuffer **outbuf)
@@ -942,6 +942,7 @@ static int mjpeg_encoder_encode_frame(VideoEncoder *video_encoder,
         return VIDEO_ENCODER_FRAME_UNSUPPORTED;
     }
 
+    const SpiceBitmap *bitmap = &image->u.bitmap;
     int ret = mjpeg_encoder_start_frame(encoder, bitmap->format, src,
                                         buffer, frame_mm_time);
     if (ret == VIDEO_ENCODER_FRAME_ENCODE_DONE) {

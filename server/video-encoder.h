@@ -78,7 +78,7 @@ struct VideoEncoder {
      *                              only happen if rate control is active.
      */
     int (*encode_frame)(VideoEncoder *encoder, uint32_t frame_mm_time,
-                        const SpiceBitmap *bitmap,
+                        SpiceImage *image,
                         const SpiceRect *src, int top_down,
                         gpointer bitmap_opaque, VideoBuffer** outbuf);
 

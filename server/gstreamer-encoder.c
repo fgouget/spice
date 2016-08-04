@@ -1346,7 +1346,7 @@ static void unmap_and_release_memory(GstMapInfo *map, GstBuffer *buffer)
 
 /* A helper for spice_gst_encoder_encode_frame() */
 static int push_raw_frame(SpiceGstEncoder *encoder,
-                          const SpiceBitmap *bitmap,
+                          const SpiceImage *image,
                           const SpiceRect *src, int top_down,
                           gpointer bitmap_opaque)
 {
@@ -1357,6 +1357,7 @@ static int push_raw_frame(SpiceGstEncoder *encoder,
     GstBuffer *buffer = gst_buffer_new();
     /* TODO Use GST_MAP_INFO_INIT once GStreamer 1.4.5 is no longer relevant */
     GstMapInfo map = { .memory = NULL };
+    const SpiceBitmap *bitmap = &image->u.bitmap;
 
     /* Note that we should not reorder the lines, even if top_down is false.
      * It just changes the number of lines to skip at the start of the bitmap.
@@ -1465,7 +1466,7 @@ static void spice_gst_encoder_destroy(VideoEncoder *video_encoder)
 
 static int spice_gst_encoder_encode_frame(VideoEncoder *video_encoder,
                                           uint32_t frame_mm_time,
-                                          const SpiceBitmap *bitmap,
+                                          SpiceImage *image,
                                           const SpiceRect *src, int top_down,
                                           gpointer bitmap_opaque,
                                           VideoBuffer **outbuf)
@@ -1477,20 +1478,22 @@ static int spice_gst_encoder_encode_frame(VideoEncoder *video_encoder,
     /* Unref the last frame's bitmap_opaque structures if any */
     clear_zero_copy_queue(encoder, FALSE);
 
+    SpiceBitmapFmt image_format = image->u.bitmap.format;
+
     uint32_t width = src->right - src->left;
     uint32_t height = src->bottom - src->top;
     if (width != encoder->width || height != encoder->height ||
-        encoder->spice_format != bitmap->format) {
+        encoder->spice_format != image_format) {
         spice_debug("video format change: width %d -> %d, height %d -> %d, format %d -> %d",
                     encoder->width, width, encoder->height, height,
-                    encoder->spice_format, bitmap->format);
-        encoder->format = map_format(bitmap->format);
+                    encoder->spice_format, image_format);
+        encoder->format = map_format(image_format);
         if (encoder->format == GSTREAMER_FORMAT_INVALID) {
-            spice_warning("unable to map format type %d", bitmap->format);
+            spice_warning("unable to map format type %d", image_format);
             encoder->errors = 4;
             return VIDEO_ENCODER_FRAME_UNSUPPORTED;
         }
-        encoder->spice_format = bitmap->format;
+        encoder->spice_format = image_format;
         encoder->width = width;
         encoder->height = height;
         if (encoder->bit_rate == 0) {
@@ -1530,7 +1533,7 @@ static int spice_gst_encoder_encode_frame(VideoEncoder *video_encoder,
     }
 
     uint64_t start = spice_get_monotonic_time_ns();
-    int rc = push_raw_frame(encoder, bitmap, src, top_down, bitmap_opaque);
+    int rc = push_raw_frame(encoder, image, src, top_down, bitmap_opaque);
     if (rc == VIDEO_ENCODER_FRAME_ENCODE_DONE) {
         rc = pull_compressed_buffer(encoder, outbuf);
         if (rc != VIDEO_ENCODER_FRAME_ENCODE_DONE) {

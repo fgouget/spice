@@ -66,7 +66,7 @@ enum {
 
 typedef struct {
     gint refs;
-    SpiceBitmap *bitmap;
+    SpiceImage *image;
 } TestFrame;
 
 #ifdef HAVE_GSTREAMER_0_10
@@ -169,7 +169,7 @@ static uint64_t starting_bit_rate = 3000000;
 static void compute_clipping_rect(GstSample *sample);
 static void parse_clipping(const char *clipping);
 static TestFrame *gst_to_spice_frame(GstSample *sample);
-static void bitmap_free(SpiceBitmap *bitmap);
+static void image_free(SpiceImage *image);
 static void frame_ref(TestFrame *frame);
 static void frame_unref(TestFrame *frame);
 static void pipeline_free(TestPipeline *pipeline);
@@ -206,7 +206,7 @@ input_frames(GstSample *sample, void *param)
     TestFrame *frame = gst_to_spice_frame(sample);
 
     // send frame to our video encoder (must be from a single thread)
-    int res = video_encoder->encode_frame(video_encoder, frame_mm_time, frame->bitmap,
+    int res = video_encoder->encode_frame(video_encoder, frame_mm_time, frame->image,
                                           &clipping_rect, top_down, frame,
                                           &p_outbuf);
     switch (res) {
@@ -259,6 +259,9 @@ output_frames(GstSample *sample, void *param)
 {
     TestFrame *curr_frame = gst_to_spice_frame(sample);
 
+    // TODO support DRM prime in the future
+    spice_assert(curr_frame->image->descriptor.type == SPICE_IMAGE_TYPE_BITMAP);
+
     // get first frame queued
     pthread_mutex_lock(&frame_queue_mtx);
     TestFrame *expected_frame = g_queue_pop_head(&frame_queue);
@@ -271,16 +274,17 @@ output_frames(GstSample *sample, void *param)
 
     // TODO try to understand if this is correct
     if (!top_down) {
-        curr_frame->bitmap->flags ^= SPICE_BITMAP_FLAGS_TOP_DOWN;
+        curr_frame->image->u.bitmap.flags ^= SPICE_BITMAP_FLAGS_TOP_DOWN;
     }
 #ifdef DUMP_BITMAP
-    dump_bitmap(expected_frame->bitmap);
-    dump_bitmap(curr_frame->bitmap);
+    dump_bitmap(&expected_frame->image->u.bitmap);
+    dump_bitmap(&curr_frame->image->u.bitmap);
 #endif
 
     // compute difference
-    double psnr = compute_psnr(expected_frame->bitmap, clipping_rect.left, clipping_rect.top,
-                               curr_frame->bitmap, 0, 0,
+    double psnr = compute_psnr(&expected_frame->image->u.bitmap,
+                               clipping_rect.left, clipping_rect.top,
+                               &curr_frame->image->u.bitmap, 0, 0,
                                clipping_rect.right - clipping_rect.left,
                                clipping_rect.bottom - clipping_rect.top);
 
@@ -754,20 +758,22 @@ frame_unref(TestFrame *frame)
     if (!g_atomic_int_dec_and_test(&frame->refs)) {
         return;
     }
-    bitmap_free(frame->bitmap);
+    image_free(frame->image);
     g_free(frame);
 }
 
 static void
-bitmap_free(SpiceBitmap *bitmap)
+image_free(SpiceImage *image)
 {
-    if (!bitmap) {
+    if (!image) {
         return;
     }
+    spice_assert(image->descriptor.type == SPICE_IMAGE_TYPE_BITMAP);
+    SpiceBitmap *bitmap = &image->u.bitmap;
     spice_assert(!bitmap->palette);
     spice_assert(bitmap->data);
     spice_chunks_destroy(bitmap->data);
-    g_free(bitmap);
+    g_free(image);
 }
 
 static SpiceChunks* chunks_alloc(uint32_t stride, uint32_t height, uint32_t split);
@@ -779,8 +785,8 @@ static convert_line_t convert_line24;
 static convert_line_t convert_line32;
 static convert_line_t *get_convert_line(SpiceBitmapFmt format);
 
-static SpiceBitmap *
-gst_to_spice_bitmap(GstSample *sample)
+static SpiceImage *
+gst_to_spice_image(GstSample *sample)
 {
     GstCaps *caps = gst_sample_get_caps(sample);
     spice_assert(caps);
@@ -792,7 +798,11 @@ gst_to_spice_bitmap(GstSample *sample)
     spice_assert(gst_structure_get_int(s, "width", &width) &&
                  gst_structure_get_int(s, "height", &height));
 
-    SpiceBitmap *bitmap = g_new0(SpiceBitmap, 1);
+    SpiceImage *image = g_new0(SpiceImage, 1);
+    image->descriptor.type = SPICE_IMAGE_TYPE_BITMAP;
+    image->descriptor.width = width;
+    image->descriptor.height = height;
+    SpiceBitmap *bitmap = &image->u.bitmap;
     bitmap->format = bitmap_format;
     bitmap->flags = top_down ? SPICE_BITMAP_FLAGS_TOP_DOWN : 0;
     bitmap->x = width;
@@ -817,7 +827,7 @@ gst_to_spice_bitmap(GstSample *sample)
     gst_buffer_unmap(buffer, &mapinfo);
     // TODO should we unref buffer ??
 
-    return bitmap;
+    return image;
 }
 
 static uint32_t
@@ -955,7 +965,7 @@ gst_to_spice_frame(GstSample *sample)
 {
     TestFrame *frame = g_new0(TestFrame, 1);
     frame->refs = 1;
-    frame->bitmap = gst_to_spice_bitmap(sample);
+    frame->image = gst_to_spice_image(sample);
     return frame;
 }
 
