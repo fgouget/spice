@@ -967,10 +967,10 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
          * - token-parts/token-partitions parallelizes more operations.
          */
         int threads = get_physical_core_count();
-        int parts = threads < 2 ? 0 : threads < 4 ? 1 : threads < 8 ? 2 : 3;
 #ifdef HAVE_GSTREAMER_0_10
-        gstenc_opts = g_strdup_printf("mode=cbr min-quantizer=10 error-resilient=true max-latency=0 speed=7 threads=%d token-parts=%d", threads, parts);
+        gstenc_opts = g_strdup_printf("mode=cbr error-resilient=true max-latency=0 threads=%d", threads);
 #else
+        int parts = threads < 2 ? 0 : threads < 4 ? 1 : threads < 8 ? 2 : 3;
         gstenc_opts = g_strdup_printf("end-usage=cbr min-quantizer=10 error-resilient=default lag-in-frames=0 deadline=1 cpu-used=4 threads=%d token-partitions=%d", threads, parts);
 #endif
         break;
@@ -1047,6 +1047,22 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
     } else {
         spice_warning("GStreamer error: could not find the %s bitrate parameter", gstenc_name);
     }
+
+#ifdef HAVE_GSTREAMER_0_10
+    if (encoder->base.codec_type == SPICE_VIDEO_CODEC_TYPE_VP8) {
+        /* token-parts and min-quantizer are missing in 0.10.19 */
+        int threads = get_physical_core_count();
+        int parts = threads < 2 ? 0 : threads < 4 ? 1 : threads < 8 ? 2 : 3;
+        g_object_set(encoder->gstenc, "token-parts", parts, NULL);
+        g_object_set(encoder->gstenc, "min-quantizer", 10, NULL);
+
+        /* speed only goes up to 2 in 0.10.19.
+         * Just let the second set fail in that case.
+         */
+        g_object_set(encoder->gstenc, "speed", 2, NULL);
+        g_object_set(encoder->gstenc, "speed", 7, NULL);
+    }
+#endif
 
     set_pipeline_changes(encoder, SPICE_GST_VIDEO_PIPELINE_STATE |
                                   SPICE_GST_VIDEO_PIPELINE_BITRATE |
