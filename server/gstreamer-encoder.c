@@ -1343,17 +1343,16 @@ static void unmap_and_release_memory(GstMapInfo *map, GstBuffer *buffer)
     gst_buffer_unref(buffer);
 }
 
-/* A helper for spice_gst_encoder_encode_frame() */
-static int push_raw_frame(SpiceGstEncoder *encoder,
-                          const SpiceImage *image,
-                          const SpiceRect *src, int top_down,
-                          gpointer bitmap_opaque)
+static int setup_buffer(SpiceGstEncoder *encoder,
+                        GstBuffer *buffer,
+                        const SpiceImage *image,
+                        const SpiceRect *src, int top_down,
+                        gpointer bitmap_opaque)
 {
     uint32_t height = src->bottom - src->top;
     // GStreamer require the stream to be 4 bytes aligned
     uint32_t stream_stride = GST_ROUND_UP_4((src->right - src->left) * encoder->format->bpp / 8);
     uint32_t len = stream_stride * height;
-    GstBuffer *buffer = gst_buffer_new();
     /* TODO Use GST_MAP_INFO_INIT once GStreamer 1.4.5 is no longer relevant */
     GstMapInfo map = { .memory = NULL };
     const SpiceBitmap *bitmap = &image->u.bitmap;
@@ -1414,6 +1413,21 @@ static int push_raw_frame(SpiceGstEncoder *encoder,
         gst_buffer_append_memory(buffer, map.memory);
     }
 #endif
+    return VIDEO_ENCODER_FRAME_ENCODE_DONE;
+}
+
+/* A helper for spice_gst_encoder_encode_frame() */
+static int push_raw_frame(SpiceGstEncoder *encoder,
+                          const SpiceImage *image,
+                          const SpiceRect *src, int top_down,
+                          gpointer bitmap_opaque)
+{
+    GstBuffer *buffer = gst_buffer_new();
+
+    int r = setup_buffer(encoder, buffer, image, src, top_down, bitmap_opaque);
+    if (r != VIDEO_ENCODER_FRAME_ENCODE_DONE) {
+        return r;
+    }
 
     GstFlowReturn ret = gst_app_src_push_buffer(encoder->appsrc, buffer);
     if (ret != GST_FLOW_OK) {
