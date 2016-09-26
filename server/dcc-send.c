@@ -23,6 +23,7 @@
 #include <common/generated_server_marshallers.h>
 
 #include "dcc-private.h"
+#include "egl.h"
 #include "display-channel-private.h"
 #include "red-qxl.h"
 
@@ -1696,7 +1697,8 @@ static bool red_marshall_stream_data(RedChannelClient *rcc,
     spice_assert(drawable->red_drawable->type == QXL_DRAW_COPY);
 
     copy = &drawable->red_drawable->u.copy;
-    if (copy->src_bitmap->descriptor.type != SPICE_IMAGE_TYPE_BITMAP) {
+    if (copy->src_bitmap->descriptor.type != SPICE_IMAGE_TYPE_BITMAP &&
+        copy->src_bitmap->descriptor.type != SPICE_IMAGE_TYPE_DRM_PRIME) {
         return FALSE;
     }
 
@@ -2131,6 +2133,49 @@ static void marshall_lossless_qxl_drawable(RedChannelClient *rcc,
     }
 }
 
+void image_extract_drm(SpiceImage *image)
+{
+    if (image->descriptor.type != SPICE_IMAGE_TYPE_DRM_PRIME) {
+        return;
+    }
+
+    size_t data_size;
+    void *data = get_scanout_raw_data(&image->u.drm_prime, &data_size);
+    spice_assert(data != NULL);
+
+    /* convert the image from DRM_PRIME to BITMAP */
+    SpiceChunks *chunks = spice_chunks_new(1);
+    chunks->flags = SPICE_CHUNKS_FLAGS_FREE;
+    chunks->data_size = data_size;
+    chunks->chunk[0].data = data;
+    chunks->chunk[0].len = data_size;
+
+    uint32_t w = image->u.drm_prime.width;
+    uint32_t h = image->u.drm_prime.height;
+    uint8_t flags = image->u.drm_prime.flags & 1 ? 0 : SPICE_BITMAP_FLAGS_TOP_DOWN;
+    close(image->u.drm_prime.drm_dma_buf_fd);
+
+    image->descriptor.type = SPICE_IMAGE_TYPE_BITMAP;
+    image->u.bitmap.x = w;
+    image->u.bitmap.y = h;
+    image->u.bitmap.format = SPICE_BITMAP_FMT_32BIT;
+    image->u.bitmap.flags = flags;
+    image->u.bitmap.stride = w * 4;
+    image->u.bitmap.data = chunks;
+    image->u.bitmap.palette = NULL;
+    image->u.bitmap.palette_id = 0;
+}
+
+void red_drawable_extract_drm(RedDrawable *red_drawable)
+{
+    if (red_drawable->effect != QXL_EFFECT_OPAQUE
+        || red_drawable->type != QXL_DRAW_COPY) {
+        return;
+    }
+
+    image_extract_drm(red_drawable->u.copy.src_bitmap);
+}
+
 static void marshall_qxl_drawable(RedChannelClient *rcc,
                                   SpiceMarshaller *m,
                                   RedDrawablePipeItem *dpi)
@@ -2147,6 +2192,7 @@ static void marshall_qxl_drawable(RedChannelClient *rcc,
     if (item->stream && red_marshall_stream_data(rcc, m, item)) {
         return;
     }
+    red_drawable_extract_drm(item->red_drawable);
     if (display->priv->enable_jpeg)
         marshall_lossy_qxl_drawable(rcc, m, dpi);
     else
@@ -2242,6 +2288,7 @@ static void marshall_upgrade(RedChannelClient *rcc, SpiceMarshaller *m,
     spice_assert(red_drawable->type == QXL_DRAW_COPY);
     spice_assert(red_drawable->u.copy.rop_descriptor == SPICE_ROPD_OP_PUT);
     spice_assert(red_drawable->u.copy.mask.bitmap == 0);
+    red_drawable_extract_drm(red_drawable);
 
     copy.base.surface_id = 0;
     copy.base.box = red_drawable->bbox;

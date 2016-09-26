@@ -23,6 +23,7 @@
 #include "display-channel-private.h"
 #include "glib-compat.h"
 #include "red-qxl.h"
+#include "egl.h"
 
 G_DEFINE_TYPE(DisplayChannel, display_channel, TYPE_COMMON_GRAPHICS_CHANNEL)
 
@@ -1127,7 +1128,8 @@ static bool drawable_can_stream(DisplayChannel *display, Drawable *drawable)
 
     image = red_drawable->u.copy.src_bitmap;
     if (image == NULL ||
-        image->descriptor.type != SPICE_IMAGE_TYPE_BITMAP) {
+        (image->descriptor.type != SPICE_IMAGE_TYPE_BITMAP &&
+         image->descriptor.type != SPICE_IMAGE_TYPE_DRM_PRIME)) {
         return FALSE;
     }
 
@@ -1760,8 +1762,10 @@ static void drawable_draw(DisplayChannel *display, Drawable *drawable)
         break;
     }
     case QXL_DRAW_COPY: {
-        SpiceCopy copy = drawable->red_drawable->u.copy;
+        SpiceCopy copy;
         SpiceImage img1, img2;
+        red_drawable_extract_drm(drawable->red_drawable);
+        copy = drawable->red_drawable->u.copy;
         image_cache_localize(&display->priv->image_cache, &copy.src_bitmap, &img1, drawable);
         image_cache_localize_mask(&display->priv->image_cache, &copy.mask, &img2);
         canvas->ops->draw_copy(canvas, &drawable->red_drawable->bbox,

@@ -195,6 +195,7 @@ void image_cache_localize(ImageCache *cache, SpiceImage **image_ptr,
     }
     case SPICE_IMAGE_TYPE_BITMAP:
     case SPICE_IMAGE_TYPE_SURFACE:
+    case SPICE_IMAGE_TYPE_DRM_PRIME:
         /* nothing */
         break;
     default:

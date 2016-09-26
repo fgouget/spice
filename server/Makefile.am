@@ -102,6 +102,8 @@ libserver_la_SOURCES =				\
 	display-channel.h			\
 	display-channel-private.h		\
 	display-limits.h			\
+	egl.c					\
+	egl.h					\
 	event-loop.c				\
 	glib-compat.h				\
 	glz-encoder.c				\

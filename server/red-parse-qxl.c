@@ -593,6 +593,9 @@ static void red_put_image(SpiceImage *red)
     case SPICE_IMAGE_TYPE_QUIC:
         spice_chunks_destroy(red->u.quic.data);
         break;
+    case SPICE_IMAGE_TYPE_DRM_PRIME:
+        close(red->u.drm_prime.drm_dma_buf_fd);
+        break;
     }
     g_free(red);
 }

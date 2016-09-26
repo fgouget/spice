@@ -33,6 +33,7 @@
 
 #include "video-encoder.h"
 #include "spice-bitmap-utils.h"
+#include "egl.h"
 #include "reds.h" // reds_get_mm_time
 
 static const char program_description[] =
@@ -259,7 +260,8 @@ output_frames(GstSample *sample, void *param)
 {
     TestFrame *curr_frame = gst_to_spice_frame(sample);
 
-    // TODO support DRM prime in the future
+    // get a bitmap if necessary
+    image_extract_drm(curr_frame->image);
     spice_assert(curr_frame->image->descriptor.type == SPICE_IMAGE_TYPE_BITMAP);
 
     // get first frame queued
@@ -271,6 +273,7 @@ output_frames(GstSample *sample, void *param)
         g_printerr("Frame not present in the queue but arrived in output!\n");
         exit(1);
     }
+    image_extract_drm(expected_frame->image);
 
     // TODO try to understand if this is correct
     if (!top_down) {
@@ -768,11 +771,16 @@ image_free(SpiceImage *image)
     if (!image) {
         return;
     }
-    spice_assert(image->descriptor.type == SPICE_IMAGE_TYPE_BITMAP);
-    SpiceBitmap *bitmap = &image->u.bitmap;
-    spice_assert(!bitmap->palette);
-    spice_assert(bitmap->data);
-    spice_chunks_destroy(bitmap->data);
+    if (image->descriptor.type == SPICE_IMAGE_TYPE_BITMAP) {
+        SpiceBitmap *bitmap = &image->u.bitmap;
+        spice_assert(!bitmap->palette);
+        spice_assert(bitmap->data);
+        spice_chunks_destroy(bitmap->data);
+    } else {
+        spice_assert(image->descriptor.type == SPICE_IMAGE_TYPE_DRM_PRIME);
+        SpiceDrmPrime *prime = &image->u.drm_prime;
+        close(prime->drm_dma_buf_fd);
+    }
     g_free(image);
 }
 

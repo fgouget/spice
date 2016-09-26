@@ -96,6 +96,25 @@ struct Drawable {
     DisplayChannel *display;
 };
 
+static inline bool red_drawable_is_drm(RedDrawable *red_drawable)
+{
+    return red_drawable->type == QXL_DRAW_COPY &&
+           red_drawable->u.copy.src_bitmap &&
+           red_drawable->u.copy.src_bitmap->descriptor.type == SPICE_IMAGE_TYPE_DRM_PRIME;
+}
+
+static inline bool spice_image_get_top_down(const SpiceImage *image)
+{
+    return image->descriptor.type == SPICE_IMAGE_TYPE_BITMAP ?
+           !!(image->u.bitmap.flags & SPICE_BITMAP_FLAGS_TOP_DOWN) :
+           !(image->u.drm_prime.flags & 1);
+}
+
+static inline bool drawable_is_drm(Drawable *drawable)
+{
+    return red_drawable_is_drm(drawable->red_drawable);
+}
+
 DisplayChannel*            display_channel_new                       (RedsState *reds,
                                                                       QXLInstance *qxl,
                                                                       const SpiceCoreInterfaceInternal *core,

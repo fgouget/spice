@@ -27,6 +27,7 @@
 #include "red-common.h"
 #include "video-encoder.h"
 #include "utils.h"
+#include "egl.h"
 
 #define MJPEG_MAX_FPS 25
 #define MJPEG_MIN_FPS 1
@@ -941,6 +942,8 @@ static int mjpeg_encoder_encode_frame(VideoEncoder *video_encoder,
     if (!buffer) {
         return VIDEO_ENCODER_FRAME_UNSUPPORTED;
     }
+
+    image_extract_drm(image);
 
     const SpiceBitmap *bitmap = &image->u.bitmap;
     int ret = mjpeg_encoder_start_frame(encoder, bitmap->format, src,

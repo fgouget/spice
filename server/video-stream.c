@@ -22,6 +22,7 @@
 #include "display-channel-private.h"
 #include "main-channel-client.h"
 #include "red-client.h"
+#include "egl.h"
 
 #define FPS_TEST_INTERVAL 1
 #define FOREACH_STREAMS(display, item)                  \
@@ -216,6 +217,7 @@ static void update_copy_graduality(DisplayChannel *display, Drawable *drawable)
         return; // already set
     }
 
+    red_drawable_extract_drm(drawable->red_drawable);
     bitmap = &drawable->red_drawable->u.copy.src_bitmap->u.bitmap;
 
     if (!bitmap_fmt_has_graduality(bitmap->format) || bitmap_has_extra_stride(bitmap) ||
@@ -277,8 +279,7 @@ static bool is_next_stream_frame(const Drawable *candidate,
     }
 
     if (stream) {
-        SpiceBitmap *bitmap = &red_drawable->u.copy.src_bitmap->u.bitmap;
-        if (stream->top_down != !!(bitmap->flags & SPICE_BITMAP_FLAGS_TOP_DOWN)) {
+        if (stream->top_down != spice_image_get_top_down(red_drawable->u.copy.src_bitmap)) {
             return FALSE;
         }
     }
@@ -407,8 +408,7 @@ static void display_channel_create_stream(DisplayChannel *display, Drawable *dra
     stream->height = src_rect->bottom - src_rect->top;
     stream->dest_area = drawable->red_drawable->bbox;
     stream->refs = 1;
-    SpiceBitmap *bitmap = &drawable->red_drawable->u.copy.src_bitmap->u.bitmap;
-    stream->top_down = !!(bitmap->flags & SPICE_BITMAP_FLAGS_TOP_DOWN);
+    stream->top_down = spice_image_get_top_down(drawable->red_drawable->u.copy.src_bitmap);
     drawable->stream = stream;
     /* Provide an fps estimate the video encoder can use when initializing
      * based on the frames that lead to the creation of the stream. Round to
