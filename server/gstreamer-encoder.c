@@ -108,7 +108,6 @@ typedef struct SpiceGstEncoder {
     uint32_t width;
     uint32_t height;
     const SpiceFormatForGStreamer *format;
-    SpiceBitmapFmt spice_format;
 
     /* Number of consecutive frame encoding errors. */
     uint32_t errors;
@@ -1478,22 +1477,23 @@ static int spice_gst_encoder_encode_frame(VideoEncoder *video_encoder,
     /* Unref the last frame's bitmap_opaque structures if any */
     clear_zero_copy_queue(encoder, FALSE);
 
-    SpiceBitmapFmt image_format = image->u.bitmap.format;
+    const SpiceFormatForGStreamer *format =
+        map_format(image->u.bitmap.format);
+
+    if (format == GSTREAMER_FORMAT_INVALID) {
+        spice_warning("unable to map format type");
+        encoder->errors = 4;
+        return VIDEO_ENCODER_FRAME_UNSUPPORTED;
+    }
 
     uint32_t width = src->right - src->left;
     uint32_t height = src->bottom - src->top;
     if (width != encoder->width || height != encoder->height ||
-        encoder->spice_format != image_format) {
-        spice_debug("video format change: width %d -> %d, height %d -> %d, format %d -> %d",
+        encoder->format != format) {
+        spice_debug("video format change: width %d -> %d, height %d -> %d, format %p -> %p",
                     encoder->width, width, encoder->height, height,
-                    encoder->spice_format, image_format);
-        encoder->format = map_format(image_format);
-        if (encoder->format == GSTREAMER_FORMAT_INVALID) {
-            spice_warning("unable to map format type %d", image_format);
-            encoder->errors = 4;
-            return VIDEO_ENCODER_FRAME_UNSUPPORTED;
-        }
-        encoder->spice_format = image_format;
+                    encoder->format, format);
+        encoder->format = format;
         encoder->width = width;
         encoder->height = height;
         if (encoder->bit_rate == 0) {
