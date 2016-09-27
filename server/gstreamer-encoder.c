@@ -299,6 +299,8 @@ typedef struct SpiceGstEncoder {
 
     /* How many frames were dropped by the server since the last encoded frame. */
     uint32_t server_drops;
+
+    bool dumped;
 } SpiceGstEncoder;
 
 
@@ -603,6 +605,7 @@ static void set_bit_rate(SpiceGstEncoder *encoder, uint64_t bit_rate)
     if (bit_rate == encoder->bit_rate) {
         return;
     }
+    printf("setting bit_rate to %"PRIu64"\n", bit_rate);
     if (bit_rate < SPICE_GST_MIN_BITRATE) {
         /* Don't let the bit rate go too low... */
         bit_rate = SPICE_GST_MIN_BITRATE;
@@ -968,7 +971,7 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
     gchar *desc = g_strdup_printf("appsrc is-live=true format=time do-timestamp=true name=src !"
                                   " %s ! %s name=encoder %s ! appsink name=sink",
                                   converter, gstenc_name, gstenc_opts);
-    spice_debug("GStreamer pipeline: %s", desc);
+    printf("GStreamer pipeline: %s\n", desc);
     encoder->pipeline = gst_parse_launch_full(desc, NULL, GST_PARSE_FLAG_FATAL_ERRORS, &err);
     g_free(gstenc_opts);
     g_free(desc);
@@ -991,6 +994,7 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
     GstAppSinkCallbacks appsink_cbs = {NULL, NULL, &new_sample, {NULL}};
 #endif
     gst_app_sink_set_callbacks(encoder->appsink, &appsink_cbs, encoder, NULL);
+    printf("buffers %u\n", gst_app_sink_get_max_buffers(encoder->appsink));
 
     /* Hook into the bus so we can handle errors */
     GstBus *bus = gst_element_get_bus(encoder->pipeline);
@@ -1558,6 +1562,22 @@ static int spice_gst_encoder_encode_frame(VideoEncoder *video_encoder,
              */
             free_pipeline(encoder);
             encoder->errors++;
+        } else {
+            static FILE *f = NULL;
+            static bool first = true;
+            if (encoder->dumped || first) {
+                // this is the first
+                if (!encoder->dumped) {
+                    encoder->dumped = true;
+                    first = false;
+                }
+                if (!f)
+                    f = fopen("/tmp/out.dat", "wb");
+                if (f) {
+                    fwrite((*outbuf)->data, 1, (*outbuf)->size, f);
+                    fflush(f);
+                }
+            }
         }
     }
 

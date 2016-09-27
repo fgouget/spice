@@ -1682,6 +1682,16 @@ static void red_release_video_encoder_buffer(uint8_t *data, void *opaque)
     buffer->free(buffer);
 }
 
+static char *
+get_timestamp(char *buffer, uint64_t time)
+{
+    time /= 10000000u;
+    time %= 3600llu * 100llu;
+    unsigned hour = time / 100u;
+    sprintf(buffer, "%02u:%02u.%02u", hour/60u, hour%60u, (unsigned) (time % 100u));
+    return buffer;
+}
+
 static bool red_marshall_stream_data(RedChannelClient *rcc,
                                      SpiceMarshaller *base_marshaller,
                                      Drawable *drawable)
@@ -1689,6 +1699,7 @@ static bool red_marshall_stream_data(RedChannelClient *rcc,
     DisplayChannelClient *dcc = DISPLAY_CHANNEL_CLIENT(rcc);
     DisplayChannel *display = DCC_TO_DC(dcc);
     VideoStream *stream = drawable->stream;
+    RedDrawable *rd = drawable->red_drawable;
     SpiceCopy *copy;
     uint32_t frame_mm_time;
     int is_sized;
@@ -1718,6 +1729,7 @@ static bool red_marshall_stream_data(RedChannelClient *rcc,
     frame_mm_time =  drawable->red_drawable->mm_time ?
                         drawable->red_drawable->mm_time :
                         reds_get_mm_time();
+    rd->time_encoding = spice_get_real_time_ns();
     ret = !agent->video_encoder ? VIDEO_ENCODER_FRAME_UNSUPPORTED :
           agent->video_encoder->encode_frame(agent->video_encoder,
                                              frame_mm_time,
@@ -1725,6 +1737,13 @@ static bool red_marshall_stream_data(RedChannelClient *rcc,
                                              &copy->src_area, stream->top_down,
                                              drawable->red_drawable,
                                              &outbuf);
+    rd->time_encoded = spice_get_real_time_ns();
+#define TM(x) (((double) (rd->x - rd->time_queued)) / 1000000000.0)
+    char tsbuf[32];
+    printf("encoded res %d size %u times %s %g %g %g %g\n", ret, outbuf ? outbuf->size : 0,
+           get_timestamp(tsbuf, rd->time_queued), TM(time_scanout) * 1000, TM(time_extracted), TM(time_encoding), TM(time_encoded));
+#undef TM
+
     switch (ret) {
     case VIDEO_ENCODER_FRAME_DROP:
 #ifdef STREAM_STATS
@@ -2138,6 +2157,7 @@ void image_extract_drm(SpiceImage *image)
     if (image->descriptor.type != SPICE_IMAGE_TYPE_DRM_PRIME) {
         return;
     }
+    spice_debug("raw data extracted from texture\n");
 
     size_t data_size;
     void *data = get_scanout_raw_data(&image->u.drm_prime, &data_size);

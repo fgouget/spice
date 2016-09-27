@@ -228,6 +228,7 @@ static void update_copy_graduality(DisplayChannel *display, Drawable *drawable)
     }
 }
 
+static const char *is_next_stream_frame_reason = "";
 static bool is_next_stream_frame(const Drawable *candidate,
                                  const int other_src_width,
                                  const int other_src_height,
@@ -239,11 +240,13 @@ static bool is_next_stream_frame(const Drawable *candidate,
     RedDrawable *red_drawable;
 
     if (!candidate->streamable) {
+        is_next_stream_frame_reason = "no streamable";
         return FALSE;
     }
 
     if (candidate->creation_time - other_time >
             (stream ? RED_STREAM_CONTINUOUS_MAX_DELTA : RED_STREAM_DETECTION_MAX_DELTA)) {
+        is_next_stream_frame_reason = "too late";
         return FALSE;
     }
 
@@ -252,16 +255,19 @@ static bool is_next_stream_frame(const Drawable *candidate,
         SpiceRect* candidate_src;
 
         if (!rect_is_equal(&red_drawable->bbox, other_dest)) {
+            is_next_stream_frame_reason = "rect different";
             return FALSE;
         }
 
         candidate_src = &red_drawable->u.copy.src_area;
         if (candidate_src->right - candidate_src->left != other_src_width ||
             candidate_src->bottom - candidate_src->top != other_src_height) {
+            is_next_stream_frame_reason = "rect different 2";
             return FALSE;
         }
     } else {
         if (!rect_contains(&red_drawable->bbox, other_dest)) {
+            is_next_stream_frame_reason = "not contained";
             return FALSE;
         }
         int candidate_area = rect_get_area(&red_drawable->bbox);
@@ -269,6 +275,7 @@ static bool is_next_stream_frame(const Drawable *candidate,
         /* do not stream drawables that are significantly
          * bigger than the original frame */
         if (candidate_area > 2 * other_area) {
+            is_next_stream_frame_reason = "too big";
             spice_debug("too big candidate:");
             spice_debug("prev box ==>");
             rect_debug(other_dest);
@@ -280,6 +287,7 @@ static bool is_next_stream_frame(const Drawable *candidate,
 
     if (stream) {
         if (stream->top_down != spice_image_get_top_down(red_drawable->u.copy.src_bitmap)) {
+            is_next_stream_frame_reason = "different topdown";
             return FALSE;
         }
     }
@@ -475,6 +483,16 @@ void video_stream_trace_update(DisplayChannel *display, Drawable *drawable)
     ItemTrace *trace_end;
     RingItem *item;
 
+    RedDrawable *red_drawable = drawable->red_drawable;
+    if (red_drawable->type == QXL_DRAW_COPY &&
+        red_drawable->u.copy.rop_descriptor == SPICE_ROPD_OP_PUT) {
+        SpiceImage *image;
+        image = red_drawable->u.copy.src_bitmap;
+        if (image && image->descriptor.type == SPICE_IMAGE_TYPE_DRM_PRIME && !drawable->stream) {
+            printf("DRM prime not in a stream\n");
+        }
+    }
+
     if (drawable->stream || !drawable->streamable || drawable->frames_count) {
         return;
     }
@@ -537,8 +555,15 @@ void video_stream_maintenance(DisplayChannel *display,
             prev->streamable = FALSE; //prevent item trace
             attach_stream(display, candidate, stream);
         }
+        if (drawable_is_drm(candidate) && !is_next_frame && !candidate->stream) {
+            printf("breakpoint\n");
+        }
     } else if (candidate->streamable) {
         SpiceRect* prev_src = &prev->red_drawable->u.copy.src_area;
+
+        if (drawable_is_drm(candidate) && !candidate->stream && !prev->stream) {
+            printf("breakpoint\n");
+        }
 
         is_next_frame =
             is_next_stream_frame(candidate, prev_src->right - prev_src->left,

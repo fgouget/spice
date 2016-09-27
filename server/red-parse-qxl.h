@@ -57,6 +57,7 @@ typedef struct RedDrawable {
         SpiceWhiteness whiteness;
         SpiceComposite composite;
     } u;
+    uint64_t time_queued, time_scanout, time_extracted, time_encoding, time_encoded;
 } RedDrawable;
 
 typedef struct RedUpdateCmd {
