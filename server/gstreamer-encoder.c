@@ -848,20 +848,22 @@ static GstBusSyncReply handle_pipeline_message(GstBus *bus, GstMessage *msg, gpo
     return GST_BUS_PASS;
 }
 
-static GstFlowReturn new_sample(GstAppSink *gstappsink, gpointer video_encoder)
+static SpiceGstVideoBuffer *get_gst_buffer(SpiceGstEncoder *encoder)
 {
-    SpiceGstEncoder *encoder = (SpiceGstEncoder*)video_encoder;
-    SpiceGstVideoBuffer *outbuf = create_gst_video_buffer();
-
 #ifdef HAVE_GSTREAMER_0_10
-    outbuf->gst_buffer = gst_app_sink_pull_buffer(encoder->appsink);
-    if (outbuf->gst_buffer) {
+    GstBuffer *gst_buffer = gst_app_sink_pull_buffer(encoder->appsink);
+    if (gst_buffer) {
+        SpiceGstVideoBuffer *outbuf = create_gst_video_buffer();
+
+        outbuf->gst_buffer = gst_buffer;
         outbuf->base.data = GST_BUFFER_DATA(outbuf->gst_buffer);
         outbuf->base.size = GST_BUFFER_SIZE(outbuf->gst_buffer);
     }
 #else
     GstSample *sample = gst_app_sink_pull_sample(encoder->appsink);
     if (sample) {
+        SpiceGstVideoBuffer *outbuf = create_gst_video_buffer();
+
         outbuf->gst_buffer = gst_sample_get_buffer(sample);
         gst_buffer_ref(outbuf->gst_buffer);
         gst_sample_unref(sample);
@@ -869,12 +871,20 @@ static GstFlowReturn new_sample(GstAppSink *gstappsink, gpointer video_encoder)
             outbuf->base.data = outbuf->map.data;
             outbuf->base.size = gst_buffer_get_size(outbuf->gst_buffer);
         }
+        return outbuf;
     }
 #endif
+    return NULL;
+}
+
+static GstFlowReturn new_sample(GstAppSink *gstappsink, gpointer video_encoder)
+{
+    SpiceGstEncoder *encoder = (SpiceGstEncoder*)video_encoder;
 
     /* Notify the main thread that the output buffer is ready */
     pthread_mutex_lock(&encoder->outbuf_mutex);
-    encoder->outbuf = (VideoBuffer*)outbuf;
+    spice_assert(encoder->outbuf == NULL);
+    encoder->outbuf = (VideoBuffer*)0xdeadbeef;
     pthread_cond_signal(&encoder->outbuf_cond);
     pthread_mutex_unlock(&encoder->outbuf_mutex);
 
@@ -996,6 +1006,7 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
     GstAppSinkCallbacks appsink_cbs = {NULL, NULL, &new_sample, {NULL}};
 #endif
     gst_app_sink_set_callbacks(encoder->appsink, &appsink_cbs, encoder, NULL);
+    gst_app_sink_set_max_buffers(encoder->appsink, 2);
     printf("buffers %u\n", gst_app_sink_get_max_buffers(encoder->appsink));
 
     /* Hook into the bus so we can handle errors */
@@ -1452,6 +1463,9 @@ static int pull_compressed_buffer(SpiceGstEncoder *encoder,
     pthread_mutex_lock(&encoder->outbuf_mutex);
     while (!encoder->outbuf) {
         pthread_cond_wait(&encoder->outbuf_cond, &encoder->outbuf_mutex);
+    }
+    if (encoder->outbuf == (VideoBuffer*)0xdeadbeef) {
+        encoder->outbuf = (VideoBuffer*)get_gst_buffer(encoder);
     }
     *outbuf = encoder->outbuf;
     encoder->outbuf = NULL;
