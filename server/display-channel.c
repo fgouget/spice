@@ -1086,6 +1086,9 @@ static bool current_add(DisplayChannel *display, Ring *ring, Drawable *drawable)
         region_or(&exclude_rgn, &item->base.rgn);
         exclude_region(display, ring, exclude_base, &exclude_rgn, NULL, drawable);
         video_stream_trace_update(display, drawable);
+        if (drawable_is_drm(drawable) && !drawable->stream) {
+            fprintf(stderr, "%s:%d drm not in stream!\n", __FILE__, __LINE__);
+        }
         streams_update_visible_region(display, drawable);
         /*
          * Performing the insertion after exclude_region for
