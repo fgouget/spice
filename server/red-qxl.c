@@ -59,6 +59,8 @@ struct QXLState {
     uint32_t device_display_ids[MAX_MONITORS_COUNT];
     size_t monitors_count;  // length of ^^^
 
+    void *egl_display;
+
     pthread_mutex_t scanout_mutex;
     SpiceMsgDisplayGlScanoutUnix scanout;
     uint64_t gl_draw_cookie;
@@ -774,6 +776,14 @@ void red_qxl_put_gl_scanout(QXLInstance *qxl, SpiceMsgDisplayGlScanoutUnix *scan
     if (scanout) {
         pthread_mutex_unlock(&qxl->st->scanout_mutex);
     }
+}
+
+SPICE_GNUC_VISIBLE
+void spice_qxl_gl_setup(QXLInstance *qxl,
+                        void *egl_display)
+{
+    QXLState *qxl_state = qxl->st;
+    qxl_state->egl_display = egl_display;
 }
 
 SPICE_GNUC_VISIBLE

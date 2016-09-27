@@ -114,6 +114,9 @@ void spice_qxl_gl_draw_async(QXLInstance *instance,
                              uint32_t x, uint32_t y,
                              uint32_t w, uint32_t h,
                              uint64_t cookie);
+/* since spice 0.13.4 */
+void spice_qxl_gl_setup(QXLInstance *instance,
+                        void *egl_display);
 
 /* since spice 0.14.2 */
 
