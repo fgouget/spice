@@ -40,6 +40,7 @@
 # define DO_ZERO_COPY
 #endif
 
+#define FIXED_BITRATE (40 * 1000 * 1000)
 
 typedef struct {
     SpiceBitmapFmt spice_format;
@@ -602,6 +603,7 @@ static void set_bit_rate(SpiceGstEncoder *encoder, uint64_t bit_rate)
         /* Use the default value */
         bit_rate = SPICE_GST_DEFAULT_BITRATE;
     }
+    bit_rate = FIXED_BITRATE;
     if (bit_rate == encoder->bit_rate) {
         return;
     }
@@ -1023,6 +1025,7 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
         spice_warning("GStreamer error: could not find the %s bitrate parameter", gstenc_name);
     }
 
+    encoder->video_bit_rate = FIXED_BITRATE;
     set_pipeline_changes(encoder, SPICE_GST_VIDEO_PIPELINE_STATE |
                                   SPICE_GST_VIDEO_PIPELINE_BITRATE |
                                   SPICE_GST_VIDEO_PIPELINE_CAPS);
@@ -1800,7 +1803,7 @@ VideoEncoder *gstreamer_encoder_new(SpiceVideoCodecType codec_type,
     encoder->unused_bitmap_opaques = g_async_queue_new();
 #endif
 
-    encoder->starting_bit_rate = starting_bit_rate;
+    encoder->starting_bit_rate = FIXED_BITRATE;
     encoder->cbs = *cbs;
     encoder->bitmap_ref = bitmap_ref;
     encoder->bitmap_unref = bitmap_unref;
