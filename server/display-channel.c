@@ -19,6 +19,10 @@
 #endif
 
 #include <common/sw_canvas.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 #include "display-channel-private.h"
 #include "glib-compat.h"
@@ -123,6 +127,9 @@ display_channel_finalize(GObject *object)
 static void drawable_draw(DisplayChannel *display, Drawable *drawable);
 static Drawable *display_channel_drawable_try_new(DisplayChannel *display,
                                                   uint32_t process_commands_generation);
+static RedDrawable *get_dummy_drawable(DisplayChannel *display,
+                                       const SpiceMsgDisplayGlScanoutUnix *scanout);
+static RedDrawable *get_dummy_gl_drawable(DisplayChannel *display);
 
 uint32_t display_channel_generate_uid(DisplayChannel *display)
 {
@@ -389,6 +396,10 @@ static void pipes_add_drawable_after(DisplayChannel *display,
     for (l = pos_after->pipes; l != NULL; l = l->next) {
         dpi_pos_after = l->data;
 
+        if (!red_channel_client_pipe_item_is_linked(RED_CHANNEL_CLIENT(dpi_pos_after->dcc),
+                                                    &dpi_pos_after->base)) {
+            continue;
+        }
         num_other_linked++;
         dcc_add_drawable_after(dpi_pos_after->dcc, drawable, &dpi_pos_after->base);
     }
@@ -1461,6 +1472,8 @@ static void display_channel_add_drawable(DisplayChannel *display, Drawable *draw
         add_to_pipe = current_add(display, ring, drawable);
     }
 
+    // TODO handle differently dummy events ??
+    // on destroy decrement gl_count ??
     if (add_to_pipe)
         pipes_add_drawable(display, drawable);
 
@@ -2410,8 +2423,48 @@ void display_channel_update_compression(DisplayChannel *display, DisplayChannelC
     spice_debug("zlib-over-glz %s", display->priv->enable_zlib_glz_wrap ? "enabled" : "disabled");
 }
 
+static inline pid_t gettid(void)
+{
+    return (pid_t) syscall(SYS_gettid);
+}
+
+static gboolean display_channel_gl_handle_remote(DisplayChannel *display, uint32_t process_commands_generation,
+                                                 uint64_t time_queued)
+{
+    RedChannelClient *rcc;
+
+    // check if all channel are remote
+//    printf("entering...\n");
+    FOREACH_CLIENT(display, rcc) {
+        if (!red_stream_is_plain_unix(red_channel_client_get_stream(rcc)) ||
+            !red_channel_client_test_remote_cap(rcc, SPICE_DISPLAY_CAP_GL_SCANOUT)) {
+            if (display->priv->gl_dummy_count > 1)
+                printf("dummy count %d\n", display->priv->gl_dummy_count);
+            if (display->priv->gl_dummy_count > 500) {
+                return TRUE;
+            }
+            RedDrawable *red_drawable = get_dummy_gl_drawable(display);
+            if (red_drawable) {
+                red_drawable->time_queued = time_queued;
+                // FIXME no flow control, check pipe size!
+                display_channel_process_draw(display, red_drawable, process_commands_generation);
+                red_drawable_unref(red_drawable);
+#if 0
+                static int count = 0;
+                printf("%d current_size %d gl_dummy_count %d queue %u tid %u\n", ++count, display->current_size, display->priv->gl_dummy_count,
+                       red_channel_max_pipe_size(RED_CHANNEL(display)), (unsigned) gettid());
+#endif
+            }
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+
 void display_channel_gl_scanout(DisplayChannel *display)
 {
+    // don't call display_channel_gl_handle_remote, draw commands always follows
     red_channel_pipes_new_add(RED_CHANNEL(display), dcc_gl_scanout_item_new, NULL);
 }
 
@@ -2424,13 +2477,16 @@ static void set_gl_draw_async_count(DisplayChannel *display, int num)
     }
 }
 
-void display_channel_gl_draw(DisplayChannel *display, SpiceMsgDisplayGlDraw *draw)
+void display_channel_gl_draw(DisplayChannel *display, SpiceMsgDisplayGlDraw *draw, uint32_t process_commands_generation,
+                             uint64_t time)
 {
-    int num;
+    int num = 0;
 
     spice_return_if_fail(display->priv->gl_draw_async_count == 0);
 
-    num = red_channel_pipes_new_add(RED_CHANNEL(display), dcc_gl_draw_item_new, draw);
+    if (!display_channel_gl_handle_remote(display, process_commands_generation, time)) {
+        num = red_channel_pipes_new_add(RED_CHANNEL(display), dcc_gl_draw_item_new, draw);
+    }
     set_gl_draw_async_count(display, num);
 }
 
@@ -2568,4 +2624,67 @@ void display_channel_debug_oom(DisplayChannel *display, const char *msg)
                 display->priv->encoder_shared_data.glz_drawable_count,
                 ring_get_length(&display->priv->current_list),
                 red_channel_sum_pipes_size(channel));
+}
+
+/**
+ * Returns a RedDrawable with a bitmap image pointing to the data image
+ * we provide
+ */
+static RedDrawable *get_dummy_drawable(DisplayChannel *display,
+                                       const SpiceMsgDisplayGlScanoutUnix *scanout)
+{
+    uint32_t w = scanout->width, h = scanout->height;
+    SpiceImage *image = spice_new0(SpiceImage, 1);
+    image->descriptor.type = SPICE_IMAGE_TYPE_DRM_PRIME;
+    image->descriptor.width = w;
+    image->descriptor.height = h;
+    image->u.drm_prime = (SpiceDrmPrime){
+        .drm_dma_buf_fd = dup(scanout->drm_dma_buf_fd),
+        .width = w,
+        .height = h,
+        .stride = scanout->stride,
+        .drm_fourcc_format = scanout->drm_fourcc_format,
+        .flags = scanout->flags,
+    };
+
+    RedDrawable *red = spice_new0(RedDrawable, 1);
+    red->refs = 1;
+    display->priv->gl_dummy_count++;
+    red->release_info_ext.info = (void *) display;
+    red->effect = QXL_EFFECT_OPAQUE;
+    red->type = QXL_DRAW_COPY;
+    red->bbox.bottom = h;
+    red->bbox.right = w;
+    red->surface_deps[0] = -1;
+    red->surface_deps[1] = -1;
+    red->surface_deps[2] = -1;
+    red->u.copy.src_area = red->bbox;
+    red->u.copy.rop_descriptor = SPICE_ROPD_OP_PUT;
+    red->u.copy.src_bitmap = image;
+
+    return red;
+}
+
+static RedDrawable *get_dummy_gl_drawable(DisplayChannel *display)
+{
+    RedDrawable *red_drawable = NULL;
+    QXLInstance *qxl = display->priv->qxl;
+
+    SpiceMsgDisplayGlScanoutUnix *scanout = red_qxl_get_gl_scanout(qxl);
+    if (scanout != NULL) {
+        spice_assert(scanout->drm_dma_buf_fd >= 0);
+        uint64_t time_scanout = spice_get_real_time_ns();
+        uint64_t time_extracted = spice_get_real_time_ns();
+        red_drawable = get_dummy_drawable(display, scanout);
+        spice_assert(red_drawable);
+        red_drawable->time_scanout = time_scanout;
+        red_drawable->time_extracted = time_extracted;
+    }
+    red_qxl_put_gl_scanout(qxl, scanout);
+    return red_drawable;
+}
+
+void display_channel_release_dummy(DisplayChannel *display)
+{
+    display->priv->gl_dummy_count--;
 }

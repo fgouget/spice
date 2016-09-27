@@ -946,7 +946,7 @@ void handle_dev_gl_draw_async(void *opaque, void *payload)
     RedWorker *worker = opaque;
     RedWorkerMessageGlDraw *draw = payload;
 
-    display_channel_gl_draw(worker->display_channel, &draw->draw);
+    display_channel_gl_draw(worker->display_channel, &draw->draw, worker->process_display_generation, draw->time);
 }
 
 static void handle_dev_close(void *opaque, void *payload)

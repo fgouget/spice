@@ -161,9 +161,10 @@ void                       display_channel_process_surface_cmd       (DisplayCha
 void                       display_channel_update_compression        (DisplayChannel *display,
                                                                       DisplayChannelClient *dcc);
 void                       display_channel_gl_scanout                (DisplayChannel *display);
-void                       display_channel_gl_draw                   (DisplayChannel *display,
-                                                                      SpiceMsgDisplayGlDraw *draw);
+void display_channel_gl_draw(DisplayChannel *display, SpiceMsgDisplayGlDraw *draw,
+                             uint32_t process_commands_generation, uint64_t time);
 void                       display_channel_gl_draw_done              (DisplayChannel *display);
+void display_channel_release_dummy(DisplayChannel *display);
 
 void display_channel_update_monitors_config(DisplayChannel *display, QXLMonitorsConfig *config,
                                             uint16_t count, uint16_t max_allowed);

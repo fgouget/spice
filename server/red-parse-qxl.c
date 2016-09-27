@@ -26,6 +26,7 @@
 #include "red-common.h"
 #include "red-qxl.h"
 #include "memslot.h"
+#include "display-channel.h"
 #include "red-parse-qxl.h"
 
 /* Max size in bytes for any data field used in a QXL command.
@@ -1237,6 +1238,8 @@ static void red_put_drawable(RedDrawable *red)
     }
     if (red->qxl != NULL) {
         red_qxl_release_resource(red->qxl, red->release_info_ext);
+    } else {
+        display_channel_release_dummy((DisplayChannel *) red->release_info_ext.info);
     }
 }
 

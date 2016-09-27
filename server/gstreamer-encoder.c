@@ -27,11 +27,18 @@
 #include <gst/app/gstappsrc.h>
 #include <gst/app/gstappsink.h>
 #include <gst/video/video.h>
+#include <gst/allocators/allocators.h>
 #include <orc/orcprogram.h>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <drm_fourcc.h>
 
 #include "red-common.h"
 #include "video-encoder.h"
 #include "utils.h"
+#include "egl.h"
 
 
 #define SPICE_GST_DEFAULT_FPS 30
@@ -48,6 +55,7 @@ typedef struct {
 #ifndef HAVE_GSTREAMER_0_10
     char format[8];
     GstVideoFormat gst_format;
+    uint32_t drm_format;
 #else
     uint32_t depth;
     uint32_t endianness;
@@ -58,11 +66,11 @@ typedef struct {
 } SpiceFormatForGStreamer;
 
 #ifndef HAVE_GSTREAMER_0_10
-#define FMT_DESC(spice_format, bpp, format, gst_format, depth, endianness, \
+#define FMT_DESC(spice_format, bpp, format, gst_format, drm_format, depth, endianness, \
                  blue_mask, green_mask, red_mask) \
-    { spice_format, bpp, format, gst_format }
+    { spice_format, bpp, format, gst_format, drm_format }
 #else
-#define FMT_DESC(spice_format, bpp, format, gst_format, depth, endianness, \
+#define FMT_DESC(spice_format, bpp, format, gst_format, drm_format, depth, endianness, \
                  blue_mask, green_mask, red_mask) \
     { spice_format, bpp, depth, endianness, blue_mask, green_mask, red_mask }
 #endif
@@ -124,6 +132,8 @@ typedef struct SpiceGstEncoder {
     GstCaps *src_caps;
     GstElement *gstenc;
     GParamSpec *gstenc_bitrate_param;
+    GstAllocator *dmabuf_allocator;
+    gboolean pipeline_supports_dmabuf;
 
     /* True if the encoder's bitrate can be modified while playing. */
     gboolean gstenc_bitrate_is_dynamic;
@@ -303,6 +313,9 @@ typedef struct SpiceGstEncoder {
 
     bool dumped;
 } SpiceGstEncoder;
+
+
+static GQuark dmabuf_memory_image_quark = 0;
 
 
 /* ---------- The SpiceGstVideoBuffer implementation ---------- */
@@ -771,30 +784,59 @@ static const SpiceFormatForGStreamer format_map[] =  {
     /* First item is invalid.
      * It's located first so the loop catch invalid values.
      */
-    FMT_DESC(SPICE_BITMAP_FMT_INVALID, 0, "", GST_VIDEO_FORMAT_UNKNOWN, 0, 0, 0, 0, 0),
-    FMT_DESC(SPICE_BITMAP_FMT_RGBA, 32, "BGRA", GST_VIDEO_FORMAT_BGRA, 24, 4321, 0xff000000, 0xff0000, 0xff00),
-    FMT_DESC(SPICE_BITMAP_FMT_16BIT, 16, "RGB15", GST_VIDEO_FORMAT_RGB15, 15, 4321, 0x001f, 0x03E0, 0x7C00),
-    /* TODO: Test the other formats under GStreamer 0.10*/
-    FMT_DESC(SPICE_BITMAP_FMT_32BIT, 32, "BGRx", GST_VIDEO_FORMAT_BGRx, 24, 4321, 0xff000000, 0xff0000, 0xff00),
-    FMT_DESC(SPICE_BITMAP_FMT_24BIT, 24, "BGR", GST_VIDEO_FORMAT_BGR, 24, 4321, 0xff0000, 0xff00, 0xff),
+    FMT_DESC(SPICE_BITMAP_FMT_INVALID, 0, "", GST_VIDEO_FORMAT_UNKNOWN, 0,
+             0, 0, 0, 0, 0),
+    FMT_DESC(SPICE_BITMAP_FMT_RGBA, 32, "BGRA", GST_VIDEO_FORMAT_BGRA, DRM_FORMAT_ARGB8888,
+             24, 4321, 0xff000000, 0xff0000, 0xff00),
+    FMT_DESC(SPICE_BITMAP_FMT_16BIT, 16, "RGB15", GST_VIDEO_FORMAT_RGB15, 0,
+             15, 4321, 0x001f, 0x03E0, 0x7C00),
+    /* TODO: Test the other formats under GStreamer 0.10 */
+#define FORMAT_UNTESTED_FROM_INDEX 2
+    FMT_DESC(SPICE_BITMAP_FMT_32BIT, 32, "BGRx", GST_VIDEO_FORMAT_BGRx, DRM_FORMAT_XRGB8888,
+             24, 4321, 0xff000000, 0xff0000, 0xff00),
+    FMT_DESC(SPICE_BITMAP_FMT_INVALID, 32, "RGBA", GST_VIDEO_FORMAT_RGBA, DRM_FORMAT_ABGR8888,
+             24, 4321, 0xff00, 0xff0000, 0xff000000),
+    FMT_DESC(SPICE_BITMAP_FMT_24BIT, 24, "BGR", GST_VIDEO_FORMAT_BGR, 0,
+             24, 4321, 0xff0000, 0xff00, 0xff),
+    FMT_DESC(SPICE_BITMAP_FMT_INVALID, 32, "RGBx", GST_VIDEO_FORMAT_RGBx, DRM_FORMAT_XBGR8888,
+             24, 4321, 0xff00, 0xff0000, 0xff000000),
+    FMT_DESC(SPICE_BITMAP_FMT_INVALID, 32, "xRGB", GST_VIDEO_FORMAT_xRGB, DRM_FORMAT_BGRX8888,
+             24, 4321, 0xff, 0xff00, 0xff0000),
+    FMT_DESC(SPICE_BITMAP_FMT_INVALID, 32, "ARGB", GST_VIDEO_FORMAT_ARGB, DRM_FORMAT_BGRA8888,
+             24, 4321, 0xff, 0xff00, 0xff0000),
+    FMT_DESC(SPICE_BITMAP_FMT_INVALID, 32, "xBGR", GST_VIDEO_FORMAT_xBGR, DRM_FORMAT_RGBX8888,
+             24, 4321, 0xff0000, 0xff00, 0xff),
+    FMT_DESC(SPICE_BITMAP_FMT_INVALID, 32, "ABGR", GST_VIDEO_FORMAT_ABGR, DRM_FORMAT_RGBA8888,
+             24, 4321, 0xff0000, 0xff00, 0xff),
 };
 #define GSTREAMER_FORMAT_INVALID (&format_map[0])
 
 /* A helper for spice_gst_encoder_encode_frame() */
-static const SpiceFormatForGStreamer *map_format(SpiceBitmapFmt format)
+static const SpiceFormatForGStreamer *map_bitmap_format(SpiceBitmapFmt format)
 {
     int i;
     for (i = 0; i < G_N_ELEMENTS(format_map); i++) {
         if (format_map[i].spice_format == format) {
-#ifdef HAVE_GSTREAMER_0_10
-            if (i > 2) {
+            if (i >= FORMAT_UNTESTED_FROM_INDEX) {
                 spice_warning("The %d format has not been tested yet", format);
             }
-#endif
             return &format_map[i];
         }
     }
+    return GSTREAMER_FORMAT_INVALID;
+}
 
+static const SpiceFormatForGStreamer *map_drm_format(uint32_t format)
+{
+    int i;
+    for (i = 0; i < G_N_ELEMENTS(format_map); i++) {
+        if (format_map[i].drm_format == format) {
+            if (i >= FORMAT_UNTESTED_FROM_INDEX) {
+                spice_warning("The %d format has not been tested yet", format);
+            }
+            return &format_map[i];
+        }
+    }
     return GSTREAMER_FORMAT_INVALID;
 }
 
@@ -891,6 +933,8 @@ static GstFlowReturn new_sample(GstAppSink *gstappsink, gpointer video_encoder)
     return GST_FLOW_OK;
 }
 
+#define VAAPI 1
+
 static const gchar* get_gst_codec_name(SpiceGstEncoder *encoder)
 {
     switch (encoder->base.codec_type)
@@ -904,7 +948,11 @@ static const gchar* get_gst_codec_name(SpiceGstEncoder *encoder)
     case SPICE_VIDEO_CODEC_TYPE_VP8:
         return "vp8enc";
     case SPICE_VIDEO_CODEC_TYPE_H264:
+#if !VAAPI
         return "x264enc";
+#else
+        return "vaapih264enc";
+#endif
     case SPICE_VIDEO_CODEC_TYPE_VP9:
         return "vp9enc";
     default:
@@ -914,12 +962,24 @@ static const gchar* get_gst_codec_name(SpiceGstEncoder *encoder)
     }
 }
 
+static const char *opts = "max-bframes=0 min-qp=5 ! video/x-h264,profile=high";
+SPICE_CONSTRUCTOR_FUNC(opts_init)
+{
+    const char *s = g_getenv("SPICE_GST_OPTS");
+    if (s)
+        opts = s;
+}
+
 static gboolean create_pipeline(SpiceGstEncoder *encoder)
 {
 #ifdef HAVE_GSTREAMER_0_10
     const gchar *converter = "ffmpegcolorspace";
 #else
+#if !VAAPI
     const gchar *converter = "videoconvert";
+#else
+    const gchar *converter = "vaapipostproc";
+#endif
 #endif
     const gchar* gstenc_name = get_gst_codec_name(encoder);
     if (!gstenc_name) {
@@ -962,6 +1022,7 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
         break;
         }
     case SPICE_VIDEO_CODEC_TYPE_H264:
+#if !VAAPI
         /* - Set tune and sliced-threads to ensure a zero-frame latency
          * - qp-min ensures the bitrate does not get needlessly high.
          * - qp-max ensures the compression does not go so high that the video
@@ -972,6 +1033,30 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
          *   thus helping with streaming.
          */
         gstenc_opts = g_strdup("byte-stream=true aud=true qp-min=15 qp-max=35 tune=4 sliced-threads=true speed-preset=ultrafast intra-refresh=true");
+#else
+        /* - bitrate. The desired bitrate expressed in kbps.
+         * - cabac. Enable CABAC entropy coding mode.
+         * - cpb-length. Coded Picture Buffer in milliseconds (default 1500).
+         * - dct8x8. Enable adaptive use of 8x8 transforms in I-frames.
+         * - init-qp. Initial quantizer value (default 26).
+         * - keyframe-period. Maximum distance between two keyframes (default 30).
+         * - max-bframes. Number of B-frames between I and P.
+         * - min-qp. Minimum quantizer value (default 1).
+         * - num-slices. Number of slices per frame.
+         * - num-views. Number of Views for MVC encoding.
+         * - rate-control. Rate control mode (default Constant QP).
+         *   - cqp Constant QP
+         *   - cbr Constant bitrate
+         *   - vbr Variable bitrate
+         *   - vbr_constrained Variable bitrate - Constrained
+         * - tune. Encoder tuning option.
+         *   - none
+         *   - high-compression High compression
+         *   - low-power Low power mode
+         * - view-ids. Set of View Ids used for MVC encoding.
+         */
+        gstenc_opts = g_strdup(opts); // rate-control=cbr bitrate=1200");
+#endif
         break;
     default:
         /* gstreamer_encoder_new() should have rejected this codec type */
@@ -985,6 +1070,7 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
                                   converter, gstenc_name, gstenc_opts);
     printf("GStreamer pipeline: %s\n", desc);
     encoder->pipeline = gst_parse_launch_full(desc, NULL, GST_PARSE_FLAG_FATAL_ERRORS, &err);
+    encoder->pipeline_supports_dmabuf = TRUE;
     g_free(gstenc_opts);
     g_free(desc);
     if (!encoder->pipeline || err) {
@@ -1163,6 +1249,7 @@ typedef struct {
     gint refs;
     SpiceGstEncoder *encoder;
     gpointer opaque;
+    SpiceImage *image;
 } BitmapWrapper;
 
 static void clear_zero_copy_queue(SpiceGstEncoder *encoder, gboolean unref_queue)
@@ -1176,13 +1263,14 @@ static void clear_zero_copy_queue(SpiceGstEncoder *encoder, gboolean unref_queue
     }
 }
 
-static BitmapWrapper *bitmap_wrapper_new(SpiceGstEncoder *encoder, gpointer bitmap_opaque)
+static BitmapWrapper *bitmap_wrapper_new(SpiceGstEncoder *encoder, gpointer bitmap_opaque, SpiceImage *image)
 {
     BitmapWrapper *wrapper = g_new(BitmapWrapper, 1);
     wrapper->refs = 1;
     wrapper->encoder = encoder;
     wrapper->opaque = bitmap_opaque;
     encoder->bitmap_ref(bitmap_opaque);
+    wrapper->image = image;
     return wrapper;
 }
 
@@ -1233,7 +1321,7 @@ static inline int zero_copy(SpiceGstEncoder *encoder,
         if (wrapper) {
             g_atomic_int_inc(&wrapper->refs);
         } else {
-            wrapper = bitmap_wrapper_new(encoder, bitmap_opaque);
+            wrapper = bitmap_wrapper_new(encoder, bitmap_opaque, NULL);
         }
         uint32_t thislen = MIN(chunks->chunk[*chunk_index].len - *chunk_offset, *len);
         GstMemory *mem = gst_memory_new_wrapped(GST_MEMORY_FLAG_READONLY,
@@ -1361,6 +1449,89 @@ static void unmap_and_release_memory(GstMapInfo *map, GstBuffer *buffer)
     gst_buffer_unref(buffer);
 }
 
+static gpointer my_mem_map(GstMemory *mem, gsize maxsize, GstMapFlags flags)
+{
+    /* not supposed to write to */
+    if ((flags & GST_MAP_WRITE) != 0) {
+        return NULL;
+    }
+
+    BitmapWrapper *wrapper = gst_mini_object_get_qdata(&mem->mini_object, dmabuf_memory_image_quark);
+    SpiceImage *image = wrapper->image;
+    /* mark that pipeline cannot support DMA buffers */
+    wrapper->encoder->pipeline_supports_dmabuf = FALSE;
+    /* TODO make sure the format we are extracting is the same as format
+     * expected from GStreamer.
+     * FIXME do not change image !!!
+     * TODO store extracted image and convert image to bitmap
+     * (fixing format)
+     */
+    image_extract_drm(image);
+    if (image->descriptor.type != SPICE_IMAGE_TYPE_BITMAP) {
+        return NULL;
+    }
+    return image->u.bitmap.data->chunk->data;
+}
+
+static void create_dmabuf_allocator(SpiceGstEncoder *encoder)
+{
+    /* We need to create a standard dmabuf_allocator as the definition
+     * is not public and we can't inherit from it.
+     * Also GstMemory from the dmabuf allocator are not public
+     * too so they must be created with this allocator.
+     * Creating a different GstMemory and setting mem_type may work
+     * but may also produce crashes as some code could check for the
+     * type and assume the structure is a GstDmabufMemory (for instance
+     * calling gst_dmabuf_memory_get_fd).
+     * However we need to override memory mapping as some dma buffers
+     * (for instance the ones from Intel graphic cards) have not a linear
+     * memory layout as expected by the standard memory dmabuf allocator
+     * mapping functions.
+     */
+    spice_assert(encoder->dmabuf_allocator == NULL);
+    encoder->dmabuf_allocator = gst_dmabuf_allocator_new();
+    spice_assert(encoder->dmabuf_allocator);
+    encoder->dmabuf_allocator->mem_map = my_mem_map;
+    encoder->dmabuf_allocator->mem_map_full = NULL;
+
+    if (dmabuf_memory_image_quark == 0) {
+        dmabuf_memory_image_quark = g_quark_from_static_string("SpiceGstDmabufMemoryImage");
+    }
+}
+
+static int setup_buffer_from_drm(SpiceGstEncoder *encoder,
+                                 GstBuffer *buffer,
+                                 SpiceImage *image,
+                                 const SpiceRect *src, int top_down,
+                                 gpointer bitmap_opaque)
+{
+    uint32_t height = src->bottom - src->top;
+    uint32_t stream_stride = (src->right - src->left) * encoder->format->bpp / 8;
+    uint32_t len = stream_stride * height;
+    /* TODO Use GST_MAP_INFO_INIT once GStreamer 1.4.5 is no longer relevant */
+    if (SPICE_UNLIKELY(!encoder->dmabuf_allocator)) {
+        create_dmabuf_allocator(encoder);
+    }
+    /* Create memory that refers to the DRM prime.
+     * Note that file descriptor will be freed by this memory object. */
+    int fd = dup(image->u.drm_prime.drm_dma_buf_fd);
+    GstMemory* mem = gst_dmabuf_allocator_alloc(encoder->dmabuf_allocator, fd, len);
+    gst_mini_object_set_qdata(&mem->mini_object, dmabuf_memory_image_quark,
+                              bitmap_wrapper_new(encoder, bitmap_opaque, image),
+                              bitmap_wrapper_unref);
+    gst_buffer_append_memory(buffer, mem);
+    /* Add metadata information for DRM prime.
+     * The size of the buffer can be bigger than the stream. This is used by some games
+     * (OpenArena in full screen for instance).
+     * The format must match the format passed to gstreamer or the encode will fail.
+     */
+    gsize offset[GST_VIDEO_MAX_PLANES] = {0, 0, 0, 0};
+    gint stride[GST_VIDEO_MAX_PLANES] = {image->u.drm_prime.stride, 0, 0, 0};
+    gst_buffer_add_video_meta_full(buffer, GST_VIDEO_FRAME_FLAG_NONE,
+       encoder->format->gst_format, image->u.drm_prime.width, image->u.drm_prime.height, 1, offset, stride);
+    return VIDEO_ENCODER_FRAME_ENCODE_DONE;
+}
+
 static int setup_buffer(SpiceGstEncoder *encoder,
                         GstBuffer *buffer,
                         const SpiceImage *image,
@@ -1436,13 +1607,25 @@ static int setup_buffer(SpiceGstEncoder *encoder,
 
 /* A helper for spice_gst_encoder_encode_frame() */
 static int push_raw_frame(SpiceGstEncoder *encoder,
-                          const SpiceImage *image,
+                          SpiceImage *image,
                           const SpiceRect *src, int top_down,
                           gpointer bitmap_opaque)
 {
+    int r;
     GstBuffer *buffer = gst_buffer_new();
 
-    int r = setup_buffer(encoder, buffer, image, src, top_down, bitmap_opaque);
+    /* TODO we should attempt to extract image using PBO and card */
+    /* if we cannot pass DRM primes convert them to bitmap */
+    if (image->descriptor.type == SPICE_IMAGE_TYPE_DRM_PRIME
+        && !encoder->pipeline_supports_dmabuf) {
+        image_extract_drm(image);
+    }
+
+    if (image->descriptor.type == SPICE_IMAGE_TYPE_DRM_PRIME) {
+        r = setup_buffer_from_drm(encoder, buffer, image, src, top_down, bitmap_opaque);
+    } else {
+        r = setup_buffer(encoder, buffer, image, src, top_down, bitmap_opaque);
+    }
     if (r != VIDEO_ENCODER_FRAME_ENCODE_DONE) {
         return r;
     }
@@ -1495,6 +1678,7 @@ static void spice_gst_encoder_destroy(VideoEncoder *video_encoder)
     /* Unref any lingering bitmap opaque structures from past frames */
     clear_zero_copy_queue(encoder, TRUE);
 
+    g_clear_pointer(&encoder->dmabuf_allocator, gst_object_unref);
     g_free(encoder);
 }
 
@@ -1513,7 +1697,9 @@ static int spice_gst_encoder_encode_frame(VideoEncoder *video_encoder,
     clear_zero_copy_queue(encoder, FALSE);
 
     const SpiceFormatForGStreamer *format =
-        map_format(image->u.bitmap.format);
+        image->descriptor.type == SPICE_IMAGE_TYPE_BITMAP ?
+        map_bitmap_format(image->u.bitmap.format) :
+        map_drm_format(image->u.drm_prime.drm_fourcc_format);
 
     if (format == GSTREAMER_FORMAT_INVALID) {
         spice_warning("unable to map format type");
