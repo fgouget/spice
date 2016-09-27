@@ -137,6 +137,7 @@ struct VideoStream {
 };
 
 void display_channel_init_video_streams(DisplayChannel *display);
+VideoStream* display_channel_create_video_stream(DisplayChannel *display, Drawable *drawable);
 void video_stream_stop(DisplayChannel *display, VideoStream *stream);
 void video_stream_unref(DisplayChannel *display, VideoStream *stream);
 void video_stream_trace_update(DisplayChannel *display, Drawable *drawable);

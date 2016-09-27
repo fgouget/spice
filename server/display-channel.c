@@ -211,6 +211,9 @@ int display_channel_get_streams_timeout(DisplayChannel *display)
         VideoStream *stream;
 
         stream = SPICE_CONTAINEROF(item, VideoStream, link);
+        if (stream == display->priv->forced_stream) {
+            continue;
+        }
         red_time_t delta = (stream->last_time + RED_STREAM_TIMEOUT) - now;
 
         if (delta < NSEC_PER_MILLISEC) {
@@ -1131,6 +1134,30 @@ static bool drawable_can_stream(DisplayChannel *display, Drawable *drawable)
         (image->descriptor.type != SPICE_IMAGE_TYPE_BITMAP &&
          image->descriptor.type != SPICE_IMAGE_TYPE_DRM_PRIME)) {
         return FALSE;
+    }
+
+    /* force streaming for DRM primes */
+    if (image->descriptor.type == SPICE_IMAGE_TYPE_DRM_PRIME) {
+        SpiceRect* rect = &drawable->red_drawable->u.copy.src_area;
+        VideoStream *stream = display->priv->forced_stream;
+
+        if (stream && (!ring_item_is_linked(&stream->link) ||
+            rect->right - rect->left != stream->width ||
+            rect->bottom - rect->top != stream->height ||
+            spice_image_get_top_down(image) != stream->top_down)) {
+            video_stream_unref(display, stream);
+            display->priv->forced_stream = stream = NULL;
+        }
+        if (!stream) {
+            display->priv->forced_stream = display_channel_create_video_stream(display, drawable);
+            if (display->priv->forced_stream) {
+                display->priv->forced_stream->refs++;
+            }
+        } else {
+            /* force stream to stay alive */
+            stream->last_time = drawable->creation_time;
+        }
+        return TRUE;
     }
 
     if (display->priv->stream_video == SPICE_STREAM_VIDEO_FILTER) {

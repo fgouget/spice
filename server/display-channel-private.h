@@ -117,6 +117,7 @@ struct DisplayChannelPrivate
     ImageCache image_cache;
 
     int gl_draw_async_count;
+    VideoStream *forced_stream;
 
 /* TODO: some day unify this, make it more runtime.. */
     stat_info_t add_stat;

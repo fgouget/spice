@@ -125,6 +125,10 @@ void video_stream_stop(DisplayChannel *display, VideoStream *stream)
         video_stream_agent_stats_print(stream_agent);
     }
     display->priv->streams_size_total -= stream->width * stream->height;
+    if (stream == display->priv->forced_stream) {
+        video_stream_unref(display, stream);
+        display->priv->forced_stream = NULL;
+    }
     ring_remove(&stream->link);
     video_stream_unref(display, stream);
 }
@@ -394,7 +398,7 @@ static VideoStream *display_channel_stream_try_new(DisplayChannel *display)
     return stream;
 }
 
-static void display_channel_create_stream(DisplayChannel *display, Drawable *drawable)
+VideoStream* display_channel_create_video_stream(DisplayChannel *display, Drawable *drawable)
 {
     DisplayChannelClient *dcc;
     VideoStream *stream;
@@ -403,7 +407,7 @@ static void display_channel_create_stream(DisplayChannel *display, Drawable *dra
     spice_assert(!drawable->stream);
 
     if (!(stream = display_channel_stream_try_new(display))) {
-        return;
+        return NULL;
     }
 
     spice_assert(drawable->red_drawable->type == QXL_DRAW_COPY);
@@ -440,6 +444,7 @@ static void display_channel_create_stream(DisplayChannel *display, Drawable *dra
                 stream->height, stream->dest_area.left, stream->dest_area.top,
                 stream->dest_area.right, stream->dest_area.bottom,
                 stream->input_fps);
+    return stream;
 }
 
 // returns whether a stream was created
@@ -470,7 +475,7 @@ static bool video_stream_add_frame(DisplayChannel *display,
     }
 
     if (is_stream_start(frame_drawable)) {
-        display_channel_create_stream(display, frame_drawable);
+        display_channel_create_video_stream(display, frame_drawable);
         return TRUE;
     }
     return FALSE;
@@ -679,7 +684,7 @@ static uint32_t get_source_fps(void *opaque)
 {
     VideoStreamAgent *agent = opaque;
 
-    return agent->stream->input_fps;
+    return MAX(agent->stream->input_fps, 1);
 }
 
 static void update_client_playback_delay(void *opaque, uint32_t delay_ms)
@@ -968,6 +973,9 @@ void video_stream_timeout(DisplayChannel *display)
     while (item) {
         VideoStream *stream = SPICE_CONTAINEROF(item, VideoStream, link);
         item = ring_next(ring, item);
+        if (stream == display->priv->forced_stream) {
+            continue;
+        }
         if (now >= (stream->last_time + RED_STREAM_TIMEOUT)) {
             detach_video_stream_gracefully(display, stream, NULL);
             video_stream_stop(display, stream);
