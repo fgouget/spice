@@ -211,8 +211,11 @@ typedef struct SpiceGstEncoder {
      */
     uint32_t next_frame_mm_time;
 
+    /* If the fps drops below this, try to lower the bit rate. */
+#   define SPICE_GST_BITRATE_PERIOD (NSEC_PER_SEC / 3)
+
     /* Defines the minimum allowed fps. */
-#   define SPICE_GST_MAX_PERIOD (NSEC_PER_SEC / 3)
+#   define SPICE_GST_MAX_PERIOD (NSEC_PER_SEC)
 
     /* How big of a margin to take to cover for latency jitter. */
 #   define SPICE_GST_LATENCY_MARGIN 0.1
@@ -546,8 +549,8 @@ static void update_next_frame_mm_time(SpiceGstEncoder *encoder)
         spice_warning("your system seems to be too slow to encode this %dx%d video in real time", encoder->width, encoder->height);
     }
 
-    min_delay_ns = MIN(min_delay_ns, SPICE_GST_MAX_PERIOD);
     if (encoder->vbuffer_free >= 0) {
+        min_delay_ns = MIN(min_delay_ns, SPICE_GST_MAX_PERIOD);
         encoder->next_frame_mm_time = get_last_frame_mm_time(encoder) +
                                       min_delay_ns / NSEC_PER_MILLISEC;
         return;
@@ -562,17 +565,17 @@ static void update_next_frame_mm_time(SpiceGstEncoder *encoder)
                 encoder->vbuffer_size);
 
     delay_ns = drops * period_ns + period_ns / 2;
-    if (delay_ns > SPICE_GST_MAX_PERIOD) {
+    if (delay_ns > SPICE_GST_BITRATE_PERIOD) {
         /* Reduce the video bit rate so we don't have to drop so many frames. */
         if (encoder->video_bit_rate > encoder->bit_rate * SPICE_GST_BITRATE_MARGIN) {
             set_video_bit_rate(encoder, encoder->bit_rate * SPICE_GST_BITRATE_MARGIN);
         } else {
             set_video_bit_rate(encoder, encoder->bit_rate);
         }
-        delay_ns = SPICE_GST_MAX_PERIOD;
     }
+    delay_ns = MIN(MAX(delay_ns, min_delay_ns), SPICE_GST_MAX_PERIOD);
     encoder->next_frame_mm_time = get_last_frame_mm_time(encoder) +
-                                  MAX(delay_ns, min_delay_ns) / NSEC_PER_MILLISEC;
+                                  delay_ns / NSEC_PER_MILLISEC;
 
     /* Drops mean a higher delay between encoded frames so update the
      * playback delay.
