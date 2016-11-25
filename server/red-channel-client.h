@@ -41,7 +41,6 @@ G_BEGIN_DECLS
 #define RED_CHANNEL_CLIENT_GET_CLASS(obj) \
     (G_TYPE_INSTANCE_GET_CLASS((obj), RED_TYPE_CHANNEL_CLIENT, RedChannelClientClass))
 
-typedef struct RedChannelClient RedChannelClient;
 typedef struct RedChannelClientClass RedChannelClientClass;
 typedef struct RedChannelClientPrivate RedChannelClientPrivate;
 

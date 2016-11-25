@@ -37,7 +37,6 @@ G_BEGIN_DECLS
 #define SMARTCARD_CHANNEL_CLIENT_GET_CLASS(obj) \
     (G_TYPE_INSTANCE_GET_CLASS((obj), TYPE_SMARTCARD_CHANNEL_CLIENT, SmartCardChannelClientClass))
 
-typedef struct SmartCardChannelClient SmartCardChannelClient;
 typedef struct SmartCardChannelClientClass SmartCardChannelClientClass;
 typedef struct SmartCardChannelClientPrivate SmartCardChannelClientPrivate;
 

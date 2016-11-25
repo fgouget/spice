@@ -39,7 +39,6 @@ G_BEGIN_DECLS
 #define MAIN_CHANNEL_CLIENT_GET_CLASS(obj) \
     (G_TYPE_INSTANCE_GET_CLASS((obj), TYPE_MAIN_CHANNEL_CLIENT, MainChannelClientClass))
 
-typedef struct MainChannelClient MainChannelClient;
 typedef struct MainChannelClientClass MainChannelClientClass;
 typedef struct MainChannelClientPrivate MainChannelClientPrivate;
 

@@ -34,7 +34,6 @@ G_BEGIN_DECLS
 #define RED_CLIENT_GET_CLASS(obj) \
     (G_TYPE_INSTANCE_GET_CLASS ((obj), RED_TYPE_CLIENT, RedClientClass))
 
-typedef struct RedClient RedClient;
 typedef struct RedClientClass RedClientClass;
 
 GType red_client_get_type (void) G_GNUC_CONST;

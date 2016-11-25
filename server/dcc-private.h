@@ -25,7 +25,6 @@
 #include "stream.h"
 #include "red-channel-client.h"
 
-typedef struct DisplayChannelClientPrivate DisplayChannelClientPrivate;
 struct DisplayChannelClientPrivate
 {
     uint32_t id;

@@ -58,7 +58,6 @@ G_BEGIN_DECLS
 #define DISPLAY_CHANNEL_GET_CLASS(obj) \
     (G_TYPE_INSTANCE_GET_CLASS((obj), TYPE_DISPLAY_CHANNEL, DisplayChannelClass))
 
-typedef struct DisplayChannel DisplayChannel;
 typedef struct DisplayChannelClass DisplayChannelClass;
 typedef struct DisplayChannelPrivate DisplayChannelPrivate;
 
