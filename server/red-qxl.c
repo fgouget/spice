@@ -838,6 +838,7 @@ void spice_qxl_gl_draw_async(QXLInstance *qxl,
             .w = w,
             .h = h
         },
+        spice_get_real_time_ns()
     };
 
     spice_return_if_fail(qxl != NULL);

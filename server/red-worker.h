@@ -268,6 +268,7 @@ typedef struct RedWorkerMessageClose {
 
 typedef struct RedWorkerMessageGlDraw {
     SpiceMsgDisplayGlDraw draw;
+    uint64_t time;
 } RedWorkerMessageGlDraw;
 
 enum {
