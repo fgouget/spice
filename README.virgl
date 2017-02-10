@@ -1,0 +1,63 @@
+Notes on Virgl branch
+=====================
+
+This is quite experimental branch adding Virgl remote support.
+
+Requirements:
+- modified Qemu;
+- modified spice-protocol;
+- modified spice-common;
+- modified spice-server.
+
+Modified Qemu
+-------------
+You can find 2 patches at
+https://cgit.freedesktop.org/~fziglio/qemu/log/?h=virgl-spice
+They add a call to spice-server. The first patch is the call while the second
+allows to use not modified version of spice-server (not mandatory if you just
+use spice-server from this branch).
+I personally use these patch on top of my distro Qemu.
+Compile and install as you like.
+
+Modified spice-protocol
+-----------------------
+You can find at
+https://cgit.freedesktop.org/~fziglio/spice-protocol/log/?h=virgl-spice
+The additional patch add a definition to allow putting DRM primes into any spice
+images.
+Compile and install so other libraries will find this new version.
+
+Modified spice-common
+---------------------
+You can find at
+https://cgit.freedesktop.org/~fziglio/spice-common/log/?h=virgl-spice
+You should use this commit to compile.
+Update the spice-common subdirectory of spice-server to last commit.
+
+Modified spice-server
+---------------------
+You can find at
+https://cgit.freedesktop.org/~fziglio/spice-server/log/?h=virgl-spice
+Quite in an experimental state.
+This is were this file is stored.
+It require epoxy to compile.
+Compile and install as usual.
+
+How to use
+----------
+Setup Qemu to enable the usage of Virgl but instead of using unix sockets for
+spice use a normal tcp port.
+Use a recent spice client that support GStreamer (not required but highly
+recommended).
+
+Compile all into your home
+--------------------------
+This is not required but if you use Qemu directly and don't want to change your
+system one of system libraries some settings before going to compile are
+necessary. Assuming you want to install to $OUTDIR (for instance $HOME/install)
+I would set these environment variable before proceeding:
+- CPPFLAGS="-I$OUTDIR/include"
+- LD_RUN_PATH="$OUTDIR/lib"
+- PATH="$OUTDIR/bin:$PATH"
+- PKG_CONFIG_PATH="$OUTDIR/share/pkgconfig:$OUTDIR/lib/pkgconfig"
+Then you can launch qemu-system-x86_64 from $OUTDIR/bin.
