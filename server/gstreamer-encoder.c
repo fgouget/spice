@@ -1133,6 +1133,12 @@ static void set_gstenc_bitrate(SpiceGstEncoder *encoder)
 /* A helper for spice_gst_encoder_encode_frame() */
 static gboolean configure_pipeline(SpiceGstEncoder *encoder)
 {
+    if (encoder->set_pipeline && encoder->pipeline) {
+        /* Always recreate the pipeline from scratch to avoid random
+         * GStreamer 0.10 stalls on RHEL 6.8.
+         */
+        free_pipeline(encoder);
+    }
     if (!encoder->pipeline && !create_pipeline(encoder)) {
         return FALSE;
     }
