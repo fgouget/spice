@@ -33,6 +33,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #else
 #include <ws2tcpip.h>
@@ -2648,6 +2649,7 @@ static int reds_init_socket(const char *addr, int portnr, int family)
             close(slisten);
             return -1;
         }
+        chmod(addr, 0666);
 
         goto listen;
     }
