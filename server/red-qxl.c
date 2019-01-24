@@ -801,7 +801,7 @@ void spice_qxl_gl_scanout(QXLInstance *qxl,
 
     pthread_mutex_lock(&qxl_state->scanout_mutex);
 
-    if (qxl_state->scanout.drm_dma_buf_fd != -1) {
+    if (qxl_state->scanout.drm_dma_buf_fd >= 0) {
         close(qxl_state->scanout.drm_dma_buf_fd);
     }
 
@@ -842,7 +842,7 @@ void spice_qxl_gl_draw_async(QXLInstance *qxl,
 
     spice_return_if_fail(qxl != NULL);
     qxl_state = qxl->st;
-    if (qxl_state->scanout.drm_dma_buf_fd == -1) {
+    if (qxl_state->scanout.drm_dma_buf_fd < 0) {
         spice_warning("called spice_qxl_gl_draw_async without a buffer");
         red_qxl_async_complete(qxl, cookie);
         return;
