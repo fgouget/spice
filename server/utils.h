@@ -65,6 +65,14 @@ static inline red_time_t spice_get_monotonic_time_ns(void)
     return NSEC_PER_SEC * time.tv_sec + time.tv_nsec;
 }
 
+static inline red_time_t spice_get_real_time_ns(void)
+{
+    struct timespec time;
+
+    clock_gettime(CLOCK_REALTIME, &time);
+    return NSEC_PER_SEC * time.tv_sec + time.tv_nsec;
+}
+
 #define MSEC_PER_SEC 1000
 
 int rgb32_data_has_alpha(int width, int height, size_t stride,
